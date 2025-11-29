@@ -64,24 +64,32 @@ static int32_t one_request(int connfd){
 		msg(errno==0 ? "EOF" : "read() error");
 		return err;
 	}
-	
-	uint32_t len=0;
-	memcpy(&len, rbuff, 4);
-	if(len>K_max_msg){
+
+	uint32_t len_net = 0;
+	memcpy(&len_net, rbuff, 4);
+
+	uint32_t len = ntohl(len_net);
+
+	// ... (read the 4-byte length 'len')
+	if (len > K_max_msg) {
 		msg("too long");
 		return -1;
 	}
-	err = readfull(connfd, &rbuff[4], 4);
-	if(err){
+	// FIX: Read 'len' bytes, starting after the 4-byte length header
+	err = readfull(connfd, &rbuff[4], len); // Change '4' to 'len'
+	if (err) {
 		msg("read() :: error");
+		return err; // Added return err for consistent error flow
 	}
-
+	
 	printf("client says :: %.*s \n",len, &rbuff[4]);
 	const char reply[]="World";
+	// ...
 	char wbuff[4+sizeof(reply)];
 	len=(uint32_t)strlen(reply);
-	memcpy(wbuff, &len, 4);
-	memcpy(&wbuff, reply, len);
+	memcpy(wbuff, &len, 4); 
+	// FIX: Destination must be wbuff[4]
+	memcpy(&wbuff[4], reply, len); 
 
 	return write_all(connfd, wbuff, 4+len);
 }
@@ -143,6 +151,12 @@ int main()
 
 	if (rv)
 	{
+		// Check if the specific error is EADDRINUSE
+        if (errno == EADDRINUSE) {
+            fprintf(stderr, "🚨 WARNING: Port %d is already in use by another process. Please choose a different port.\n", 1234);
+            // Optionally, exit gracefully instead of aborting
+            return -1; 
+        }
 		die("bind()");
 	}
 
