@@ -3,4 +3,5 @@
 m
 server
 *.bin
-logs_should_be_inisde_this.txt
+/git_logs
+
