@@ -2,22 +2,22 @@
 #include "reuse.h"
 #include <string.h>
 
-static void msg(const char *msg){
+  void msg(const char *msg){
     fprintf(stderr, "%s \n", msg);
 }
 
-static void msg_errno(const char* msg){
+  void msg_errno(const char* msg){
     fprintf(stderr, "[errno :: %d ]%s \n",errno, msg);
 }
 
-static void die(const char* msg){
+  void die(const char* msg){
     fprintf(stderr, "[errno :: %d ]%s \n",errno, msg);
     abort();
 }
 
 
 //set the file descriptor for the socket as a non blocking
-static void fd_set_nb(int fd){
+  void fd_set_nb(int fd){
     //first intialise the errno as 0
     errno=0;
     //dont know what it does 
@@ -43,15 +43,15 @@ static void fd_set_nb(int fd){
 
 }
 
-static void buf_append(std::vector<uint8_t> &buf,  const uint8_t *data, size_t len){
+  void buf_append(std::vector<uint8_t> &buf,  const uint8_t *data, size_t len){
     buf.insert(buf.end(), data, data+len);
 }
 
-static void buf_consume(std::vector<uint8_t> &buf , size_t n){
+  void buf_consume(std::vector<uint8_t> &buf , size_t n){
     buf.erase(buf.begin(), buf.begin()+n);
 }
 
-static Conn* handle_accept(int fd){
+Conn* handle_accept(int fd){
     struct sockaddr_in client_addr={};
     socklen_t addrlen =sizeof(client_addr);
     int connfd = accept(fd, (struct sockaddr*)&client_addr, &addrlen);
@@ -62,7 +62,7 @@ static Conn* handle_accept(int fd){
     }
 
     uint32_t ip = client_addr.sin_addr.s_addr;
-    fprintf(stderr, "new Client from %u.%u.%u.%u:%u\n", ip&255, (ip>>8)&255,(ip>>16)&255,(ip>>32)&255,ntohs(client_addr.sin_port));
+    fprintf(stderr, "new Client from %u.%u.%u.%u:%u\n", ip&255, (ip>>8)&255,(ip>>16)&255,ip>>24,ntohs(client_addr.sin_port));
 
     fd_set_nb(connfd);
 
@@ -73,7 +73,7 @@ static Conn* handle_accept(int fd){
 }
 
 
-static bool try_one_request(Conn *conn){
+  bool try_one_request(Conn *conn){
     if(conn->incoming.size()<4){
         return false;
     }
@@ -102,7 +102,7 @@ static bool try_one_request(Conn *conn){
     return true;
 }
 
-static void handle_write(Conn *conn){
+  void handle_write(Conn *conn){
     assert(conn->outgoing.size()>0);
     ssize_t rv=write(conn->fd, &conn->outgoing[0],conn->outgoing.size() );
 
@@ -125,7 +125,7 @@ static void handle_write(Conn *conn){
 }
 
 
-static void handle_read(Conn *conn){
+  void handle_read(Conn *conn){
     uint8_t buff[64*1024];
 
     ssize_t  rv=read(conn->fd, buff, sizeof(buff));
@@ -159,6 +159,82 @@ static void handle_read(Conn *conn){
 
         return handle_write(conn);
     }
+}
+
+
+//Client Specific 
+
+int32_t read_full(int fd, uint8_t *buf, size_t n){
+    while(n>0){
+        ssize_t rv = read(fd, buf,  n);
+        if(rv<=0){
+            return -1;
+        }
+        assert((size_t)rv<=n);
+        n-=(size_t)rv;
+        buf+=rv;
+    }
+    return 0;
+}
+
+int32_t write_all(int fd ,const uint8_t * buf, size_t n){
+    while(n>0){
+        ssize_t rv= write(fd, buf, n);
+        if(rv<=0){
+            return -1;
+        }
+        assert((size_t)rv<=n);
+        n-=(size_t)rv;
+    buf+=rv;
+    }
+    return 0;
+}
+
+
+
+int32_t send_req(int fd, const uint8_t *text, size_t len){
+    if(len>cl_k_max_msg){
+        return -1;
+    }
+    std::vector<uint8_t> wbuf;
+    buf_append(wbuf,(const uint8_t*)&len, 4);
+    buf_append(wbuf, text, len);
+
+    return write_all(fd, wbuf.data(), wbuf.size());
+
+}
+
+int32_t read_res(int fd){
+    std::vector<uint8_t> rbuf;
+
+    rbuf.resize(4);
+    errno=0;
+    int32_t err=read_full(fd,&rbuf[0],4);
+    if(err){
+        if(errno==0){
+            msg("EOF");
+        }
+        else{
+            msg("read():: error");
+        }
+        return err;
+    }
+
+    uint32_t len=0;
+    memcpy(&len,  rbuf.data(), 4);
+
+    if(len>cl_k_max_msg){
+        msg("too long");
+        return -1;
+    }
+    rbuf.resize(4+len);
+    err=read_full(fd, &rbuf[4], len);
+    if(err){
+        msg("read () :: error");
+        return err;
+    }
+    printf("len :%u data:%.*s \n", len, len<100?len:100, &rbuf[4]);
+    return 0;
 }
 
 

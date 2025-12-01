@@ -1,17 +1,4 @@
-#include <assert.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <errno.h>
 
-#include <fcntl.h>
-#include <poll.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/ip.h>
-
-#include <vector>
 #include "reuse.h"
 
 using namespace std;
@@ -73,13 +60,13 @@ int main(){
         if(pollargs[0].revents){
             if(Conn *conn=handle_accept(fd)){
                 if(fd2conn.size()<=(size_t)conn->fd){
-                    fd2conn[conn->fd]=conn;
+                    fd2conn.resize(conn->fd+1);
                 }
                 assert(!fd2conn[conn->fd]);
                 fd2conn[conn->fd]=conn;
             }
         }
-        for (size_t i = 0; i < pollargs.size(); i++)
+        for (size_t i = 1; i < pollargs.size(); ++i)
         {
             uint32_t ready = pollargs[i].revents;
 
@@ -87,16 +74,17 @@ int main(){
                 continue;
             }
             Conn *conn = fd2conn[pollargs[i].fd];
-            if(ready && POLLIN){
+            if(ready & POLLIN){
                 assert(conn->want_read);
                 handle_read(conn);
             }
 
-            if(read && POLLOUT){
+            if(ready & POLLOUT){
                 assert(conn->want_write);
                 handle_write(conn);
             }
-            if(ready && POLLERR){
+
+            if((ready & POLLERR)||conn->want_close){
                 (void)close(conn->fd);
                 fd2conn[conn->fd]=nullptr;
                 delete conn;
