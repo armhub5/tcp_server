@@ -11,7 +11,7 @@ int main(){
     if(fd<0){
         die("sockets");
     }
-
+    
     struct sockaddr_in addr={};
     addr.sin_family=AF_INET;
     addr.sin_port=ntohs(1234);
