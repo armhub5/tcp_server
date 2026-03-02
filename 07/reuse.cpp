@@ -1,6 +1,8 @@
 
 #include "reuse.h"
+#include <string>
 #include <string.h>
+#include <map>
 
   void msg(const char *msg){
     fprintf(stderr, "%s \n", msg);
@@ -73,34 +75,34 @@ Conn* handle_accept(int fd){
 }
 
 
-  bool try_one_request(Conn *conn){
-    if(conn->incoming.size()<4){
-        return false;
-    }
+//   bool try_one_request(Conn *conn){
+//     if(conn->incoming.size()<4){
+//         return false;
+//     }
 
-    uint32_t len =0;
+//     uint32_t len =0;
 
-    memcpy(&len, conn->incoming.data(),4 );
-    if(len>k_msg_max){
-        msg("message lenght :: too long");
-        conn->want_close=true;
-        return false;
-    }
+//     memcpy(&len, conn->incoming.data(),4 );
+//     if(len>k_msg_max){
+//         msg("message lenght :: too long");
+//         conn->want_close=true;
+//         return false;
+//     }
 
 
-    if(4+len>conn->incoming.size()){
-        return false;
-    }
+//     if(4+len>conn->incoming.size()){
+//         return false;
+//     }
 
-    const uint8_t *request=&conn->incoming[4];
+//     const uint8_t *request=&conn->incoming[4];
 
-    printf("client says : len:%d , data : %.*s \n", len, len<100?len:100, request);
-    buf_append(conn->outgoing, (const uint8_t*)&len, 4);
-    buf_append(conn->outgoing, request, len);
+//     printf("client says : len:%d , data : %.*s \n", len, len<100?len:100, request);
+//     buf_append(conn->outgoing, (const uint8_t*)&len, 4);
+//     buf_append(conn->outgoing, request, len);
 
-    buf_consume(conn->incoming, 4+len);
-    return true;
-}
+//     buf_consume(conn->incoming, 4+len);
+//     return true;
+// }
 
   void handle_write(Conn *conn){
     assert(conn->outgoing.size()>0);
@@ -177,32 +179,68 @@ int32_t read_full(int fd, uint8_t *buf, size_t n){
     return 0;
 }
 
-int32_t write_all(int fd ,const uint8_t * buf, size_t n){
-    while(n>0){
-        ssize_t rv= write(fd, buf, n);
-        if(rv<=0){
-            return -1;
+
+
+static int32_t write_all(int fd, const char *buf, size_t n) {
+    while (n > 0) {
+        ssize_t rv = write(fd, buf, n);
+        if (rv <= 0) {
+            return -1;  // error
         }
-        assert((size_t)rv<=n);
-        n-=(size_t)rv;
-    buf+=rv;
+        assert((size_t)rv <= n);
+        n -= (size_t)rv;
+        buf += rv;
     }
     return 0;
-}
+} 
+// int32_t write_all(int fd ,const uint8_t * buf, size_t n){
+//     while(n>0){
+//         ssize_t rv= write(fd, buf, n);
+//         if(rv<=0){
+//             return -1;
+//         }
+//         assert((size_t)rv<=n);
+//         n-=(size_t)rv;
+//     buf+=rv;
+//     }
+//     return 0;
+// }
 
 
-
-int32_t send_req(int fd, const uint8_t *text, size_t len){
-    if(len>cl_k_max_msg){
+static int32_t send_req(int fd, const std::vector<std::string> &cmd) {
+    uint32_t len = 4;
+    for (const std::string &s : cmd) {
+        len += 4 + s.size();
+    }
+    if (len > k_max_msg) {
         return -1;
     }
-    std::vector<uint8_t> wbuf;
-    buf_append(wbuf,(const uint8_t*)&len, 4);
-    buf_append(wbuf, text, len);
 
-    return write_all(fd, wbuf.data(), wbuf.size());
-
+    char wbuf[4 + k_max_msg];
+    memcpy(&wbuf[0], &len, 4);  // assume little endian
+    uint32_t n = cmd.size();
+    memcpy(&wbuf[4], &n, 4);
+    size_t cur = 8;
+    for (const std::string &s : cmd) {
+        uint32_t p = (uint32_t)s.size();
+        memcpy(&wbuf[cur], &p, 4);
+        memcpy(&wbuf[cur + 4], s.data(), s.size());
+        cur += 4 + s.size();
+    }
+    return write_all(fd, wbuf, 4 + len);
 }
+
+// int32_t send_req(int fd, const uint8_t *text, size_t len){
+//     if(len>cl_k_max_msg){
+//         return -1;
+//     }
+//     std::vector<uint8_t> wbuf;
+//     buf_append(wbuf,(const uint8_t*)&len, 4);
+//     buf_append(wbuf, text, len);
+
+//     return write_all(fd, wbuf.data(), wbuf.size());
+
+// }
 
 int32_t read_res(int fd){
     std::vector<uint8_t> rbuf;
@@ -236,5 +274,127 @@ int32_t read_res(int fd){
     printf("len :%u data:%.*s \n", len, len<100?len:100, &rbuf[4]);
     return 0;
 }
+
+
+bool read_u32(const uint8_t *&cur, const uint8_t *end, uint32_t &out){
+    if(cur + 4>end){
+        return false;
+    }
+    memcpy(&out, cur, 4);
+    cur+=4;
+    return true;
+}
+
+bool read_str(const uint8_t *& cur, const uint8_t *end, size_t n, std::string &out){
+    if(cur+n>end){
+        return false;
+    }
+    out.assign(cur, cur+n);
+    cur+=n;
+    return true;
+}
+
+int32_t parse_req(const uint8_t *data, size_t size, std::vector<std::string> &out){
+    const uint8_t *end=data+size;
+    uint32_t nstr=0;
+    if(!read_u32(data, end, nstr)){
+        return -1;
+    }
+
+    if(nstr>k_max_msg){
+        return -1;
+    }
+
+    while(out.size()<nstr){
+        uint32_t len=0;
+        if(!read_u32(data, end, len)){
+            return -1;
+        }
+        out.push_back(std::string());
+        if(!read_str(data, end, len, out.back())){
+            return -1;
+        }
+    }
+
+    if(data!=end) return -1;
+    return 0;
+}
+
+enum{
+    RES_OK=0,
+    RES_ERR=1,
+    RES_NX=2
+};
+
+struct Response{
+    uint32_t status=0;
+    std::vector<uint8_t> data;
+};
+
+std::map<std::string, std::string> g_data;
+
+void do_request(std::vector<std::string> &cmd, Response &out){
+    if(cmd.size()==2 && cmd[0]=="get"){
+        auto it =g_data.find(cmd[1]);
+        if(it ==g_data.end()){
+            out.status=RES_NX;
+            return;
+        }
+        const std::string &val=it->second;
+        out.data.assign(val.begin(), val.end());
+    }
+    else if(cmd.size()==3 && cmd[0]=="set"){
+        g_data[cmd[1]].swap(cmd[2]);
+    }
+    else if(cmd.size()==2 && cmd[0]=="del"){
+        g_data.erase(cmd[1]);
+    }
+    else{
+        out.status=RES_ERR;
+    }
+}
+
+void make_response(const Response &resp, std::vector<uint8_t>& out){
+    uint32_t resp_len=4+(uint32_t)resp.data.size();
+    buf_append(out, (const uint8_t*)&resp_len, 4);
+    buf_append(out, (const uint8_t*)&resp.status, 4);
+    buf_append(out, resp.data.data(), resp.data.size());
+}
+
+bool try_one_request(Conn *conn){
+    if(conn->incoming.size()<4){
+        return false;
+    }
+
+    uint32_t len=0;
+
+    memcpy(&len, conn->incoming.data(), 4);
+    if(len>k_max_msg){
+        msg("too long");
+        conn->want_close=true;
+        return false;
+    }
+   
+
+    if(4+len> conn->incoming.size()){
+        return false;
+    }
+    const uint8_t *request = &conn->incoming[4];
+
+    std::vector<std::string> cmd;
+    if(parse_req(request, len, cmd)<0){
+        msg("bad request");
+        conn->want_close=true;
+        return false;
+    }
+
+    Response resp;
+    do_request(cmd, resp);
+    make_response(resp, conn->outgoing);
+    buf_consume(conn->incoming, 4+len);
+
+    return true;
+}
+
 
 

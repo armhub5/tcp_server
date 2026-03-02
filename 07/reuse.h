@@ -24,18 +24,18 @@
   void die(const char* msg);
 
 
-  const size_t k_msg_max = 4096;
-    void fd_set_nb(int fd);
+  const size_t k_max_msg = 32<<20 ;
+  void fd_set_nb(int fd);
 
   struct Conn{
-      int fd=-1;
+    int fd=-1;
 
-      bool want_read=false;
-      bool want_write=false;
-      bool want_close=false;
+    bool want_read=false;
+    bool want_write=false;
+    bool want_close=false;
 
-      std::vector<uint8_t> incoming;
-      std::vector<uint8_t> outgoing;
+    std::vector<uint8_t> incoming;
+    std::vector<uint8_t> outgoing;
   };
 
   void buf_append(std::vector<uint8_t> &buf,  const uint8_t *data, size_t len);
@@ -45,10 +45,13 @@
   void handle_write(Conn *conn);
   void handle_read(Conn *conn);
   
-  const size_t cl_k_max_msg = 32<<20;
+  const size_t cl_k_max_msg = 4096;
   
   int32_t read_full(int fd, uint8_t *buf, size_t n);
   int32_t write_all(int fd ,const uint8_t * buf, size_t n);
   int32_t send_req(int fd, const uint8_t *text, size_t len);
   int32_t read_res(int fd);
+  
+  bool read_u32(const uint32_t *&cur, const uint8_t *end, uint32_t &out);
+
 #endif //REUSE_H

@@ -48,6 +48,7 @@ int main(){
 
         for(Conn *conn: fd2conn){
             if(!conn) continue;
+            
             struct pollfd pfd ={conn->fd, POLLERR, 0};
             if(conn->want_read){
                 pfd.events|=POLLIN;
